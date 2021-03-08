@@ -14,7 +14,7 @@ Parameters:
       - prod
     ConstraintDescription: must be a dev, qa, staging or prod
   S3STCAuthBucket:
-    Description: S3 Bucket to store the oAuth artifacts generated during the pipeline
+    Description: S3 Bucket to store the consumer-link artifacts generated during the pipeline
     Type: String
 
 Resources:
@@ -43,7 +43,7 @@ Resources:
   Api:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub "stc-oAuth-api-${EnvironmentType}"
+      Name: !Sub "stc-consumer-link-api-${EnvironmentType}"
       Description: "Authorization API for STC Partners"
       Cors: "'*'"
       TracingEnabled: true
