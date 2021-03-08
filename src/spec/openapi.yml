@@ -1,0 +1,191 @@
+openapi: 3.0.0
+info:
+  title: STC Consumer Authentication API
+  description: STChealth authentication API for consumers
+  version: 0.0.2
+
+paths:
+  /test:
+    get:
+      tags:
+        - STC Auth Services
+      description: Test if the endpoint is up and running.
+      responses:
+        "200":
+          description: 200 ok
+        "500":
+          description: 500 unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TestFunction.Arn}/invocations
+        responses:
+          "200":
+            statusCode: "200"
+          "500":
+            statusCode: "500"
+        passthroughBehavior: "when_no_match"
+        httpMethod: "POST"
+        contentHandling: "CONVERT_TO_TEXT"
+        type: "aws_proxy"
+  /immunization-profile:
+    post:
+      tags:
+        - Immunization Profile Request
+      description: Endpoint to retrieve personal health immunizations records
+      security: 
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImmunizationProfileRequest'
+        required: true
+      responses:
+        "200":
+          description: 200 ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImmunizationProfileResponseType'
+        "400":
+          description: 400 bad request
+        "401":
+          description: 401 unauthorized
+        "500":
+          description: 500 unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+
+components:
+  schemas:
+    ImmunizationProfileRequest:
+      type: object
+      properties:
+        subscriberKey:
+          type: string
+          description: Security key to keep track on request transactions
+          example: bf70954e6d2258b14ef7095
+    ImmunizationProfileResponseType:
+      type: object
+      properties:
+        messageMetadata:
+          $ref: '#/components/schemas/MessageMetadataType'
+        immunizationStatus:
+          $ref: '#/components/schemas/ImmunizationStatusType'
+        ImmunizationEvaluationList:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImmunizationEvaluation'
+    MessageMetadataType:
+      type: object
+      properties:
+        subscriberKey:
+          type: string
+          description: API Consumers cross reference request id
+          example: 27cfe3a1-84d4-4069-bf70-954e6d2258b1
+        messageKey:
+          type: string
+          description: A unique message/txn id generated for request
+          example: f36713d9-021c-4213-acde-2778f6d8e388
+        status:
+          type: string
+          description: OK – request successfully processed, ERROR – request failed, see errorList
+          example: OK
+          enum:
+          - OK
+          - ERROR
+        queryStatus:
+          type: string
+          description: Indicates if an immunization profile was found for the specified patient and vaccination group
+          example: FOUND
+          enum:
+          - FOUND
+          - NOT_FOUND
+        errorMessage:
+          type: string
+          description: Error messages generated while processing the request
+          default: ""
+    ImmunizationStatusType:
+      type: object
+      properties:
+        vaccineGroupName:
+          type: string
+          description: Name of Vaccination Group
+          example: COVID-19
+        seriesComplete:
+          type: boolean
+          description: Indicates that the immunization series is complete
+          example: true
+        seriesCompletionDate:
+          type: string
+          description: The date that the vaccination series was completed
+          format: date
+        validDoseCount:
+          type: integer
+          description: Number of valid doses administered
+          example: 2
+          default: 0
+        manufacturerCode:
+          type: string
+          description: MVX Code of vaccine manufacturer, see https://www2a.cdc.gov/vaccines/iis/iisstandards/vaccines.asp?rpt=mvx
+          example: MOD
+    ImmunizationEvaluation:
+      type: object
+      properties:
+        vaccineCode:
+          title: The vaccineCode schema
+          type: string
+          description: An explanation about the purpose of this instance.
+          example: "207"
+        manufacturerCode:
+          type: string
+          description: MVX Code of vaccine manufacturer, if applicable, of vaccine that completed series, see https://www2a.cdc.gov/vaccines/iis/iisstandards/vaccines.asp?rpt=mvx
+          example: MOD
+        immunizationDate:
+          type: string
+          description: An explanation about the purpose of this instance.
+          format: date
+      example:
+      - vaccineCode: "207"
+        manufacturerCode: MOD
+        immunizationDate: "20210101"
+      - vaccineCode: "207"
+        manufacturerCode: MOD
+        immunizationDate: "20210129"
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          title: Error Code
+          type: integer
+          description: API Specific Error Code
+          example: 5001
+        message:
+          title: Error Message
+          type: string
+          description: Detailed Error Message
+          example: "An error ocurred when trying to connect to the database"
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+    bearerAuth:            
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    accessCode:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: http://example.com/oauth/auth
+          tokenUrl: http://example.com/oauth/token
+          scopes:
+            covid-19: allows access to COVID-19 immunizations records

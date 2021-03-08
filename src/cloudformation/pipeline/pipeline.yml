@@ -1,0 +1,230 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation STC oAuth Pipeline"
+
+Parameters:
+  PipelineConnectionArn:
+    Description: The connection arn linked with the repository
+    Type: String
+  RepositoryId:
+    Description: The repository that codepipeline will use to pull changes
+    Type: String
+  RepositoryBranch:
+    Description: The repository branch that codepipeline will use to pull changes
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - staging
+      - master
+    ConstraintDescription: must be a dev, qa, staging or prod
+  EnvironmentType:
+    Description: The environment type
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - staging
+      - prod
+    ConstraintDescription: must be a dev, qa, staging or prod
+  S3STCAuthBucket:
+    Description: S3 Bucket to store the oAuth artifacts generated during the pipeline
+    Type: String
+  CFAPIoAuthRole:
+    Description: Cloudformation oAuth API role with permissions to create the required resources
+    Type: String
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+                - "s3.amazonaws.com"
+                - "kms.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:*"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                Resource: "arn:aws:secretsmanager:*:*:secret:build/*"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "cloudfront:CreateInvalidation"
+                  - "ecr:BatchGetImage"
+                  - "ecr:BatchCheckLayerAvailability"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "cloudformation:ListExports"
+                  - "kms:*"
+                  - "s3:*"
+                Resource:
+                  - "*"
+  CodePipeLineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+                - "codedeploy.amazonaws.com"
+                - "cloudformation.amazonaws.com"
+                - "s3.amazonaws.com"
+                - "kms.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${EnvironmentType}-stc-oauth-codepipeline-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:*"
+                  - "codebuild:*"
+                  - "s3:*"
+                  - "cloudformation:*"
+                  - "cloudwatch:*"
+                  - "iam:PassRole"
+                Resource:
+                  - "*"
+  PipelineBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+  S3OAuthBucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub stc-oauth-${EnvironmentType}-artifacts
+  CodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-CodeBuild
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Sub ${AWS::StackName}-CodeBuildLogGroup
+          Status: ENABLED
+          StreamName: !Sub ${AWS::StackName}-CodeBuildLogStream
+      Artifacts:
+        Type: CODEPIPELINE
+        Name: !Sub ${EnvironmentType}-oauth-pipeline-artifacts
+        EncryptionDisabled: true
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: "src/cloudformation/api/buildspec.yml"
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:5.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: STCAuthBucket
+            Type: PLAINTEXT
+            Value: !Ref S3STCAuthBucket
+          - Name: ENVIRONMENT_TYPE
+            Type: PLAINTEXT
+            Value: !Ref EnvironmentType
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub stc-oauth-api-pipeline-${EnvironmentType}
+      RoleArn: !GetAtt CodePipeLineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+      RestartExecutionOnUpdate: true
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Region: us-west-2
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                ConnectionArn: !Ref PipelineConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                BranchName: !Ref RepositoryBranch
+                OutputArtifactFormat: "CODE_ZIP"
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ProjectName: !Ref CodeBuild
+        - Name: DeployAPI
+          Actions:
+            - Name: PrepareAPI
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !Ref CFAPIoAuthRole
+                TemplatePath: BuildArtifact::packaged-template.yml
+                StackName: !Sub stc-oauth-api-${EnvironmentType}
+                ChangeSetName: !Sub stc-oauth-api-${EnvironmentType}-changeset
+                OutputFileName: api-stack-outputs.json
+                ParameterOverrides: !Sub |
+                  {
+                    "EnvironmentType" : "${EnvironmentType}",
+                    "S3STCAuthBucket" : "${S3STCAuthBucket}"
+                  }
+              RunOrder: 1
+              InputArtifacts:
+                - Name: BuildArtifact
+              OutputArtifacts:
+                - Name: DeployArtifact
+            - Name: ExecuteAPI
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                Capabilities: CAPABILITY_IAM
+                RoleArn: !Ref CFAPIoAuthRole
+                StackName: !Sub stc-oauth-api-${EnvironmentType}
+                ChangeSetName: !Sub stc-oauth-api-${EnvironmentType}-changeset
+              RunOrder: 2

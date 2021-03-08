@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "STC Consumer Link API for partners template format"
+
+Parameters:
+  EnvironmentType:
+    Description: The environment type
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - staging
+      - prod
+    ConstraintDescription: must be a dev, qa, staging or prod
+  S3STCAuthBucket:
+    Description: S3 Bucket to store the oAuth artifacts generated during the pipeline
+    Type: String
+
+Resources:
+  CloudWatchRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - >-
+          arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+  Account:
+    Type: "AWS::ApiGateway::Account"
+    DependsOn: [Api]
+    Properties:
+      CloudWatchRoleArn: !GetAtt
+        - CloudWatchRole
+        - Arn
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "stc-oAuth-api-${EnvironmentType}"
+      Description: "Authorization API for STC Partners"
+      Cors: "'*'"
+      TracingEnabled: true
+      EndpointConfiguration:
+        Type: "REGIONAL"
+      StageName: !Ref EnvironmentType
+      DefinitionBody:
+        "Fn::Transform":
+          Name: "AWS::Include"
+          Parameters:
+            Location: !Sub s3://${S3STCAuthBucket}/openapi.yml
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          CacheDataEncrypted: false
+          CachingEnabled: false
+          DataTraceEnabled: true
+          LoggingLevel: INFO
+          MetricsEnabled: true
+  TestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../lambda/test/get
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Events:
+        Test:
+          Type: Api
+          Properties:
+            Path: /test
+            Method: get
+            RestApiId:
+              Ref: Api
+            Auth:
+              Authorizer: NONE
+  ImmunizationProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../lambda/immunization-profile/post
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Events:
+        Auth:
+          Type: Api
+          Properties:
+            Path: /immunization-profile
+            Method: post
+            RestApiId:
+              Ref: Api
+            Auth:
+              Authorizer: NONE
