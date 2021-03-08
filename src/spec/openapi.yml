@@ -36,14 +36,14 @@ paths:
       tags:
         - Immunization Profile Request
       description: Endpoint to retrieve personal health immunizations records
-      security: 
+      security:
         - bearerAuth: []
         - apiKeyAuth: []
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ImmunizationProfileRequest'
+              $ref: "#/components/schemas/ImmunizationProfileRequest"
         required: true
       responses:
         "200":
@@ -51,7 +51,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImmunizationProfileResponseType'
+                $ref: "#/components/schemas/ImmunizationProfileResponseType"
         "400":
           description: 400 bad request
         "401":
@@ -61,8 +61,23 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
-
+                $ref: "#/components/schemas/ErrorDetail"
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ImmunizationProfileFunction.Arn}/invocations
+        responses:
+          "200":
+            statusCode: "200"
+          "400":
+            statusCode: "400"
+          "401":
+            statusCode: "401"
+          "500":
+            statusCode: "500"
+        passthroughBehavior: "when_no_match"
+        httpMethod: "POST"
+        contentHandling: "CONVERT_TO_TEXT"
+        type: "aws_proxy"
 components:
   schemas:
     ImmunizationProfileRequest:
@@ -76,13 +91,13 @@ components:
       type: object
       properties:
         messageMetadata:
-          $ref: '#/components/schemas/MessageMetadataType'
+          $ref: "#/components/schemas/MessageMetadataType"
         immunizationStatus:
-          $ref: '#/components/schemas/ImmunizationStatusType'
+          $ref: "#/components/schemas/ImmunizationStatusType"
         ImmunizationEvaluationList:
           type: array
           items:
-            $ref: '#/components/schemas/ImmunizationEvaluation'
+            $ref: "#/components/schemas/ImmunizationEvaluation"
     MessageMetadataType:
       type: object
       properties:
@@ -99,15 +114,15 @@ components:
           description: OK – request successfully processed, ERROR – request failed, see errorList
           example: OK
           enum:
-          - OK
-          - ERROR
+            - OK
+            - ERROR
         queryStatus:
           type: string
           description: Indicates if an immunization profile was found for the specified patient and vaccination group
           example: FOUND
           enum:
-          - FOUND
-          - NOT_FOUND
+            - FOUND
+            - NOT_FOUND
         errorMessage:
           type: string
           description: Error messages generated while processing the request
@@ -153,12 +168,12 @@ components:
           description: An explanation about the purpose of this instance.
           format: date
       example:
-      - vaccineCode: "207"
-        manufacturerCode: MOD
-        immunizationDate: "20210101"
-      - vaccineCode: "207"
-        manufacturerCode: MOD
-        immunizationDate: "20210129"
+        - vaccineCode: "207"
+          manufacturerCode: MOD
+          immunizationDate: "20210101"
+        - vaccineCode: "207"
+          manufacturerCode: MOD
+          immunizationDate: "20210129"
     ErrorDetail:
       type: object
       properties:
@@ -177,7 +192,7 @@ components:
       type: apiKey
       in: header
       name: X-API-KEY
-    bearerAuth:            
+    bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
